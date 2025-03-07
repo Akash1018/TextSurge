@@ -11,7 +11,7 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 
 const loginTolinkedIn = async () => {
-  await page.goto("https://www.linkedin.com/login");
+  await page.goto("https://www.linkedin.com/login", {waitUntil: "load"});
   await page.type("#username", process.env.EMAIL);
   await page.type("#password", process.env.PASSWORD);
   await page.click('[type="submit"]');
@@ -40,7 +40,7 @@ const processJobs = async () => {
     console.log(`Searching for referrals at ${job.company}`);
 
     const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${job.company}`;
-    await page.goto(searchUrl);
+    await page.goto(searchUrl, {waitUntil: "load"});
 
     const profiles = await extractProfiles();
 
@@ -93,7 +93,7 @@ const processAcceptedProfiles = async () => {
 
   for (let profile of profiles) {
     console.log(`🔄 Checking if ${profile.linkedinUrl} accepted request...`);
-    await page.goto(profile.linkedinUrl);
+    await page.goto(profile.linkedinUrl, {waitUntil: "load"});
     await new Promise((resolve) => setTimeout(resolve, 6000));
     const withdrawAvailable =
       (await page.$(
@@ -104,12 +104,8 @@ const processAcceptedProfiles = async () => {
       (await page.$("button[aria-label^='Follow']")) !== null;
     if (!withdrawAvailable && !followAvailable) {
       const job = await Job.findById(profile.jobId);
-      const res = await sendMessage(profile.linkedinUrl, job);
-      console.log("result", res);
-      if (res) {
-        const a = await Profile.deleteOne({ linkedinUrl: profile.linkedinUrl });
-        console.log(a);
-      }
+      const sended = await sendMessage(profile.linkedinUrl, job);
+      if (sended) await Profile.deleteOne({ linkedinUrl: profile.linkedinUrl });
     }
   }
 
@@ -126,7 +122,9 @@ const processAcceptedProfiles = async () => {
 const sendMessage = async (profileUrl, job) => {
   try {
     const newPage = page; // Open a new tab for sending messages (create multiple pages if your network is slow)
-    await newPage.goto(profileUrl);
+    await newPage.goto(profileUrl, {waitUntil: "load"});
+
+    // await new Promise((res) => setTimeout(res, 5000));
 
     const messageOpened = await newPage.evaluate(() => {
       const buttons = Array.from(
@@ -150,7 +148,7 @@ const sendMessage = async (profileUrl, job) => {
     console.log("Job Data:", job);
 
     const sendStatus = await newPage.evaluate(
-      ({ position, company, jobId }) => {
+       ({ position, company, jobId }) => {
         return new Promise((resolve) => {
           const messageContainer = document.querySelector(
             'div[aria-label="Write a message…"]'
@@ -160,9 +158,7 @@ const sendMessage = async (profileUrl, job) => {
           );
 
           if (messageContainer && sendButton) {
-            messageContainer.innerHTML = `<p>Hi,\n\nI hope you're having a great day:)\nI came across a job posting for a <b>${position}</b> role at <b>${company}</b> and believe I would be a great fit for this opportunity.\nI would really appreciate it if you could refer me for this position.\n</p> 
-          <p><b>Job ID - ${jobId}</b>\n</p> 
-          <p>Thanks,<br>Akash</p>`;
+            messageContainer.innerHTML = "<p>Enter text you wanna send";
 
             const inputEvent = new Event("input", { bubbles: true });
             messageContainer.dispatchEvent(inputEvent);
@@ -174,10 +170,31 @@ const sendMessage = async (profileUrl, job) => {
               code: "Enter",
             });
             messageContainer.dispatchEvent(enterEvent);
-            console.log(sendButton);
+
             setTimeout(() => {
               sendButton.click();
-              resolve(true);
+
+              setTimeout(() => {
+                const closeButton = Array.from(
+                  document.querySelectorAll(
+                    "button.msg-overlay-bubble-header__control"
+                  )
+                ).find((btn) => {
+                  const span = btn.querySelector("span.artdeco-button__text");
+                  return (
+                    span &&
+                    span.textContent.includes("Close your conversation with")
+                  );
+                });
+                if (closeButton) {
+                  console.log("Closing message window...");
+                  closeButton.click();
+                } else {
+                  console.error("Close button not found");
+                }
+
+                resolve(true);
+              }, 2000); // Wait 2 seconds before closing the window
             }, 3000);
           } else {
             console.error("Message container or send button not found");
@@ -192,7 +209,7 @@ const sendMessage = async (profileUrl, job) => {
     }
     await new Promise((r) => setTimeout(r, 3000));
     return true;
-    // kill browser if using multiple
+    // kill browser if using multiple tabs
   } catch (error) {
     console.error("Error in sendMessage:", error);
   }
@@ -209,10 +226,8 @@ const sendConnectionReq = async () => {
   activeTask = "sendConnectionReq";
   console.log("🚀 Sending connection requests");
   const profiles = await Profile.find({ status: "Connect" });
-  console.log(profiles);
   for (let profile of profiles) {
-    await page.goto(profile.linkedinUrl);
-    await new Promise((resolve) => setTimeout(resolve, 6000));
+    await page.goto(profile.linkedinUrl, {waitUntil: "load"});
     try {
       const success = await page.evaluate(() => {
         const connectButton = document.querySelector(
@@ -294,8 +309,7 @@ const extractProfiles = async () => {
       const nextButton = await page.$("button[aria-label='Next']");
       if (nextButton) {
         await nextButton.click();
-        console.log(nextButton);
-        await new Promise((resolve) => setTimeout(resolve, 10000)); // Wait 3 seconds to allow new results to load
+        await new Promise((resolve) => setTimeout(resolve, 5000)); // Wait 5 seconds to allow new results to load
       } else {
         console.log("🚫 No more pages found.");
         break;
@@ -330,7 +344,7 @@ async function executeTasks() {
   }
 }
 
-// Run every 20 seconds (adjust timing as needed)
+// Running every 30 seconds (adjust timing as needed)
 setInterval(executeTasks, 30000);
 
 export default processJobs;
