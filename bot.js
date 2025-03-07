@@ -106,7 +106,10 @@ const processAcceptedProfiles = async () => {
       const job = await Job.findById(profile.jobId);
       const res = await sendMessage(profile.linkedinUrl, job);
       console.log("result", res);
-      if (res) await Profile.deleteOne({ jobId: profile.jobId });
+      if (res) {
+        const a = await Profile.deleteOne({ linkedinUrl: profile.linkedinUrl });
+        console.log(a);
+      }
     }
   }
 
@@ -157,7 +160,9 @@ const sendMessage = async (profileUrl, job) => {
           );
 
           if (messageContainer && sendButton) {
-            messageContainer.innerHTML = `<p>Enter your text here</p>`
+            messageContainer.innerHTML = `<p>Hi,\n\nI hope you're having a great day:)\nI came across a job posting for a <b>${position}</b> role at <b>${company}</b> and believe I would be a great fit for this opportunity.\nI would really appreciate it if you could refer me for this position.\n</p> 
+          <p><b>Job ID - ${jobId}</b>\n</p> 
+          <p>Thanks,<br>Akash</p>`;
 
             const inputEvent = new Event("input", { bubbles: true });
             messageContainer.dispatchEvent(inputEvent);
