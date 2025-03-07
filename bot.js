@@ -16,9 +16,11 @@ const loginTolinkedIn = async () => {
   await page.type("#password", process.env.PASSWORD);
   await page.click('[type="submit"]');
   await page.waitForNavigation();
+  return true;
 };
 
-await loginTolinkedIn();
+const isConnected = await loginTolinkedIn();
+console.log("login", isConnected);
 
 let activeTask = null; // Tracks the currently running function
 let processJobsQueued = false; // Flag to track if processJobs is waiting to run
@@ -59,9 +61,6 @@ const processJobs = async () => {
       for (let profile of lockedProfiles) {
         await Profile.create({ linkedinUrl: profile.url, jobId: job._id });
       }
-
-      const profil = await Profile.find({ status: "Connect" });
-      console.log(profil);
 
       job.status = "processing";
       await job.save();
@@ -106,7 +105,8 @@ const processAcceptedProfiles = async () => {
     if (!withdrawAvailable && !followAvailable) {
       const job = await Job.findById(profile.jobId);
       const res = await sendMessage(profile.linkedinUrl, job);
-      if(res) await Profile.deleteOne({ jobId: profile.jobId });
+      console.log("result", res);
+      if (res) await Profile.deleteOne({ jobId: profile.jobId });
     }
   }
 
@@ -121,56 +121,76 @@ const processAcceptedProfiles = async () => {
 };
 
 const sendMessage = async (profileUrl, job) => {
-  await page.goto(profileUrl);
+  try {
+    const newPage = page; // Open a new tab for sending messages (create multiple pages if your network is slow)
+    await newPage.goto(profileUrl);
 
-  const res = await page.evaluate(() => {
-    const buttons = Array.from(
-      document.querySelectorAll('button[aria-label^="Message"]')
-    );
-    for (let button of buttons) {
-      if (button.innerText.includes("Message")) {
-        button.click();
-        return true;
-      }
-    }
-    return false;
-  });
-
-  await new Promise(resolve => setTimeout(resolve, 5000));
-
-  await page.evaluate(() => {
-      const messageContainer = document.querySelector(
-        'div[aria-label="Write a message…"]'
+    const messageOpened = await newPage.evaluate(() => {
+      const buttons = Array.from(
+        document.querySelectorAll('button[aria-label^="Message"]')
       );
-      const sendButton = document.querySelector("button.msg-form__send-button"); // Adjust the selector if needed
-
-      if (messageContainer && sendButton) {
-        console.log(job);
-        // Set the message inside the <p> tag
-        messageContainer.innerHTML =
-          `<p>Hi, I hope you're having a great day! :) I came across your job posting for a <b>Software Engineer</b> role at <b>HP</b> and believe I would be a great fit for this opportunity. I would really appreciate it if you could refer me for this position.</p> <p><b>Job ID - ${job}</b></p> <p>Thanks,<br>Akash</p>`;
-
-        const inputEvent = new Event("input", { bubbles: true });
-        messageContainer.dispatchEvent(inputEvent);
-
-        const enterEvent = new KeyboardEvent("keydown", {
-          bubbles: true,
-          cancelable: true,
-          key: "Enter",
-          code: "Enter",
-        });
-        messageContainer.dispatchEvent(enterEvent);
-
-        // Wait a bit to ensure the message is processed before clicking send
-        setTimeout(() => {
-          sendButton.click();
+      for (let button of buttons) {
+        if (button.innerText.includes("Message")) {
+          button.click();
           return true;
-        }, 3000); // Adjust the delay if needed
-      } else {
-        console.error("Message container or send button not found");
-        return false;
+        }
       }
-  });
+      return false;
+    });
+
+    if (!messageOpened) {
+      console.error("Message button not found or could not be clicked");
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10000));
+    console.log("Job Data:", job);
+
+    const sendStatus = await newPage.evaluate(
+      ({ position, company, jobId }) => {
+        return new Promise((resolve) => {
+          const messageContainer = document.querySelector(
+            'div[aria-label="Write a message…"]'
+          );
+          const sendButton = document.querySelector(
+            "button.msg-form__send-button"
+          );
+
+          if (messageContainer && sendButton) {
+            messageContainer.innerHTML = `<p>Enter your text here</p>`
+
+            const inputEvent = new Event("input", { bubbles: true });
+            messageContainer.dispatchEvent(inputEvent);
+
+            const enterEvent = new KeyboardEvent("keydown", {
+              bubbles: true,
+              cancelable: true,
+              key: "Enter",
+              code: "Enter",
+            });
+            messageContainer.dispatchEvent(enterEvent);
+            console.log(sendButton);
+            setTimeout(() => {
+              sendButton.click();
+              resolve(true);
+            }, 3000);
+          } else {
+            console.error("Message container or send button not found");
+            resolve(false);
+          }
+        });
+      },
+      job
+    );
+    if (!sendStatus) {
+      console.error("Failed to send message.");
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+    return true;
+    // kill browser if using multiple
+  } catch (error) {
+    console.error("Error in sendMessage:", error);
+  }
 };
 
 const sendConnectionReq = async () => {
@@ -287,7 +307,7 @@ const extractProfiles = async () => {
 };
 
 async function executeTasks() {
-  if (activeTask) return; // Prevent overlapping execution
+  if (activeTask || !isConnected) return; // Prevent overlapping execution
 
   try {
     console.log("⏳ Running processAcceptedProfiles...");
