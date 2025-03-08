@@ -5,6 +5,6 @@ const JobSchema = new mongoose.Schema({
     position: String,
     jobId: String,
     status: {type: String, default: "pending"},
-})
+}, {timestamps: true})
 
 export default mongoose.model("Job", JobSchema);

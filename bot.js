@@ -11,7 +11,7 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 
 const loginTolinkedIn = async () => {
-  await page.goto("https://www.linkedin.com/login", {waitUntil: "load"});
+  await page.goto("https://www.linkedin.com/login", { waitUntil: "load" });
   await page.type("#username", process.env.EMAIL);
   await page.type("#password", process.env.PASSWORD);
   await page.click('[type="submit"]');
@@ -40,26 +40,41 @@ const processJobs = async () => {
     console.log(`Searching for referrals at ${job.company}`);
 
     const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${job.company}`;
-    await page.goto(searchUrl, {waitUntil: "load"});
+    await page.goto(searchUrl, { waitUntil: "load" });
 
-    const profiles = await extractProfiles();
+    const connections = await Profile.find({
+      company: job.company,
+      status: "done",
+    });
+    console.log("Already Connection", connections);
+    if (connections) {
+      for (let person of connections) {
+        await sendMessage(person.linkedinUrl, job);
+      }
+    }
+
+    const profiles = await extractProfiles(connections.length);
 
     // messaging 5 open profiles
     if (profiles) {
       // messaging 5 open profiles (not working rn)
-      const openProfiles = profiles.filter((p) => p.isOpen).slice(0, 5);
-      console.log(JSON.stringify(openProfiles));
+      // const openProfiles = profiles.filter((p) => p.isOpen).slice(0, 5);
+      // console.log(JSON.stringify(openProfiles));
 
-      for (let profile of openProfiles) {
-        console.log("sending message");
-        await sendMessage(profile.url, job);
-      }
+      // for (let profile of openProfiles) {
+      //   console.log("sending message");
+      //   await sendMessage(profile.url, job);
+      // }
 
       // sending connection req
       const lockedProfiles = profiles.filter((p) => !p.isOpen);
       console.log("locked", lockedProfiles.length);
       for (let profile of lockedProfiles) {
-        await Profile.create({ linkedinUrl: profile.url, jobId: job._id });
+        await Profile.create({
+          linkedinUrl: profile.url,
+          jobId: job._id,
+          company: job.company,
+        });
       }
 
       job.status = "processing";
@@ -93,19 +108,16 @@ const processAcceptedProfiles = async () => {
 
   for (let profile of profiles) {
     console.log(`🔄 Checking if ${profile.linkedinUrl} accepted request...`);
-    await page.goto(profile.linkedinUrl, {waitUntil: "load"});
+    await new Promise((resolve) => setTimeout(resolve, 20000));
+    await page.goto(profile.linkedinUrl, { waitUntil: "load" });
     await new Promise((resolve) => setTimeout(resolve, 6000));
-    const withdrawAvailable =
-      (await page.$(
-        "button[aria-label^='Pending, click to withdraw invitation']"
-      )) !== null;
-
-    const followAvailable =
-      (await page.$("button[aria-label^='Follow']")) !== null;
-    if (!withdrawAvailable && !followAvailable) {
-      const job = await Job.findById(profile.jobId);
-      const sended = await sendMessage(profile.linkedinUrl, job);
-      if (sended) await Profile.deleteOne({ linkedinUrl: profile.linkedinUrl });
+    const job = await Job.findById(profile.jobId);
+    console.log(job);
+    const sended = await sendMessage(profile.linkedinUrl, job);
+    if (sended) {
+      profile.status = "done";
+      await profile.save();
+      console.log(profile);
     }
   }
 
@@ -121,12 +133,12 @@ const processAcceptedProfiles = async () => {
 
 const sendMessage = async (profileUrl, job) => {
   try {
-    const newPage = page; // Open a new tab for sending messages (create multiple pages if your network is slow)
-    await newPage.goto(profileUrl, {waitUntil: "load"});
+    // const newPage = page; // Open a new tab for sending messages (create multiple pages if your network is slow)
+    // await newPage.goto(profileUrl, { waitUntil: "load" });
 
-    // await new Promise((res) => setTimeout(res, 5000));
+    await new Promise((res) => setTimeout(res, 5000));
 
-    const messageOpened = await newPage.evaluate(() => {
+    const messageOpened = await page.evaluate(() => {
       const buttons = Array.from(
         document.querySelectorAll('button[aria-label^="Message"]')
       );
@@ -147,65 +159,63 @@ const sendMessage = async (profileUrl, job) => {
     await new Promise((resolve) => setTimeout(resolve, 10000));
     console.log("Job Data:", job);
 
-    const sendStatus = await newPage.evaluate(
-       ({ position, company, jobId }) => {
-        return new Promise((resolve) => {
-          const messageContainer = document.querySelector(
-            'div[aria-label="Write a message…"]'
-          );
-          const sendButton = document.querySelector(
-            "button.msg-form__send-button"
-          );
+    const sendStatus = await page.evaluate(({ position, company, jobId }) => {
+      return new Promise((resolve) => {
+        const messageContainer = document.querySelector(
+          'div[aria-label="Write a message…"]'
+        );
+        const sendButton = document.querySelector(
+          "button.msg-form__send-button"
+        );
 
-          if (messageContainer && sendButton) {
-            messageContainer.innerHTML = "<p>Enter text you wanna send";
+        if (messageContainer && sendButton) {
+          messageContainer.innerHTML = "<p>Enter text you wanna send";
 
-            const inputEvent = new Event("input", { bubbles: true });
-            messageContainer.dispatchEvent(inputEvent);
+          const inputEvent = new Event("input", { bubbles: true });
+          messageContainer.dispatchEvent(inputEvent);
 
-            const enterEvent = new KeyboardEvent("keydown", {
-              bubbles: true,
-              cancelable: true,
-              key: "Enter",
-              code: "Enter",
-            });
-            messageContainer.dispatchEvent(enterEvent);
+          const enterEvent = new KeyboardEvent("keydown", {
+            bubbles: true,
+            cancelable: true,
+            key: "Enter",
+            code: "Enter",
+          });
+          messageContainer.dispatchEvent(enterEvent);
+
+          setTimeout(() => {
+            sendButton.click();
 
             setTimeout(() => {
-              sendButton.click();
+              const closeButton = Array.from(
+                document.querySelectorAll(
+                  "button.msg-overlay-bubble-header__control"
+                )
+              ).find((btn) => {
+                const span = btn.querySelector("span.artdeco-button__text");
+                return (
+                  span &&
+                  span.textContent.includes("Close your conversation with")
+                );
+              });
+              if (closeButton) {
+                console.log("Closing message window...");
+                closeButton.click();
+              } else {
+                console.error("Close button not found");
+              }
 
-              setTimeout(() => {
-                const closeButton = Array.from(
-                  document.querySelectorAll(
-                    "button.msg-overlay-bubble-header__control"
-                  )
-                ).find((btn) => {
-                  const span = btn.querySelector("span.artdeco-button__text");
-                  return (
-                    span &&
-                    span.textContent.includes("Close your conversation with")
-                  );
-                });
-                if (closeButton) {
-                  console.log("Closing message window...");
-                  closeButton.click();
-                } else {
-                  console.error("Close button not found");
-                }
-
-                resolve(true);
-              }, 2000); // Wait 2 seconds before closing the window
-            }, 3000);
-          } else {
-            console.error("Message container or send button not found");
-            resolve(false);
-          }
-        });
-      },
-      job
-    );
+              resolve(true);
+            }, 2000); // Wait 2 seconds before closing the window
+          }, 3000);
+        } else {
+          console.error("Message container or send button not found");
+          resolve(false);
+        }
+      });
+    }, job);
     if (!sendStatus) {
       console.error("Failed to send message.");
+      return false;
     }
     await new Promise((r) => setTimeout(r, 3000));
     return true;
@@ -227,19 +237,21 @@ const sendConnectionReq = async () => {
   console.log("🚀 Sending connection requests");
   const profiles = await Profile.find({ status: "Connect" });
   for (let profile of profiles) {
-    await page.goto(profile.linkedinUrl, {waitUntil: "load"});
+    await page.goto(profile.linkedinUrl, { waitUntil: "load" });
     try {
-      const success = await page.evaluate(() => {
+      const success = await page.evaluate(async () => {
         const connectButton = document.querySelector(
           'button[aria-label^="Invite"][aria-label$="to connect"]'
         );
+
+        await new Promise((resolve) => setTimeout(resolve, 7000));
         if (connectButton) {
           connectButton.click();
           return true;
         }
         return false;
       });
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 7000));
 
       if (success) {
         await page.evaluate(async () => {
@@ -272,9 +284,10 @@ const sendConnectionReq = async () => {
   }
 };
 
-const extractProfiles = async () => {
+const extractProfiles = async (size) => {
   try {
     let profiles = [];
+    if (size >= 10) return profiles;
     let currentPage = 1;
     const maxPages = 4;
 
@@ -288,11 +301,19 @@ const extractProfiles = async () => {
       const newProfiles = await page.evaluate(() => {
         const results = [];
         const check = new Set();
-        document.querySelectorAll("a[href*='/in/']").forEach((el) => {
-          const profileUrl = el.href.split("?")[0]; // Clean profile URL
-          if (!check.has(profileUrl)) {
-            results.push({ url: profileUrl, isOpen: false });
+        document.querySelectorAll("a[href*='/in/']").forEach(({ href }) => {
+          const profileUrl = href.split("?")[0]; // Clean profile URL
+          const profileName = profileUrl.split("/in/")[1];
+
+          // Skip if already added or if it's a mutual connection
+          if (
+            !check.has(profileUrl) &&
+            /^[a-zA-Z0-9-]+$/.test(profileName) &&
+            !profileName.startsWith("ACo")
+          ) {
             check.add(profileUrl);
+            results.push({ url: profileUrl, isOpen: false });
+            console.log(profileUrl);
           }
         });
         return results;
@@ -304,12 +325,12 @@ const extractProfiles = async () => {
 
       // Append new profiles while avoiding duplicates
       profiles = [...profiles, ...newProfiles];
-
+      await new Promise((resolve) => setTimeout(resolve, 7000));
       // Check for a "Next" button and go to the next page
       const nextButton = await page.$("button[aria-label='Next']");
       if (nextButton) {
-        await nextButton.click();
-        await new Promise((resolve) => setTimeout(resolve, 5000)); // Wait 5 seconds to allow new results to load
+        nextButton.click();
+        await new Promise((resolve) => setTimeout(resolve, 7000)); // Wait 5 seconds to allow new results to load
       } else {
         console.log("🚫 No more pages found.");
         break;
@@ -319,7 +340,7 @@ const extractProfiles = async () => {
     }
 
     console.log(`✅ Total profiles collected: ${profiles.length}`);
-    return profiles.slice(0, 16); // Limit to 16 profiles across pages
+    return profiles.slice(0, 20 - size); // Limit to 20 profiles across pages
   } catch (error) {
     console.log("Not working", error);
   }
@@ -344,7 +365,20 @@ async function executeTasks() {
   }
 }
 
-// Running every 30 seconds (adjust timing as needed)
-setInterval(executeTasks, 30000);
+const deleteOldJobs = async () => {
+  try {
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+    await Job.deleteMany({ createdAt: { $lt: threeDaysAgo } });
+    console.log("Old Job Deleted");
+  } catch (error) {
+    console.log(err);
+  }
+};
+
+// Running every 20 min (adjust timing as needed)
+setInterval(executeTasks, 1200000);
+setInterval(deleteOldJobs, 60 * 60 * 1000);
 
 export default processJobs;
