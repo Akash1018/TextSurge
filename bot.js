@@ -269,51 +269,54 @@ const sendConnectionReq = async () => {
   console.log("🚀 Sending connection requests");
   const profiles = await Profile.find({ status: "Connect" });
   for (let profile of profiles) {
+    await new Promise((res) =>
+      setTimeout(res, (Math.floor(Math.random() * 5) + 8) * 1000)
+    );
     await page.goto(profile.linkedinUrl, { waitUntil: "domcontentloaded" });
+    await new Promise((resolve) => setTimeout(resolve, 8000));
     try {
       const success = await page.evaluate(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
         const connectButton = document.querySelector(
           'button[aria-label^="Invite"][aria-label$="to connect"]'
-        );
-
-        await new Promise((resolve) =>
-          setTimeout(resolve, (Math.floor(Math.random() * 2) + 1) * 10000)
         );
         if (connectButton) {
           connectButton.click();
           return true;
-        } 
+        }
 
-        const userName = document.querySelector('h1.inline.t-24.v-align-middle.break-words')?.textContent.trim();
+        const userName = document
+          .querySelector("h1.inline.t-24.v-align-middle.break-words")
+          ?.textContent.trim();
         const moreButton = document.querySelector(
           `div[aria-label="Invite ${userName} to connect"`
         );
-        if(moreButton) {
+        if (moreButton) {
           moreButton.click();
           return true;
         }
         return false;
       });
-      await new Promise((resolve) =>
-        setTimeout(resolve, (Math.floor(Math.random() * 2) + 1) * 10000)
-      );
-
+      console.log(success);
       if (success) {
         await page.evaluate(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 6000));
           const skipButton = document.querySelector(
             'button[aria-label="Send without a note"]'
           );
           console.log(skipButton);
+          await new Promise((resolve) => setTimeout(resolve, 6000));
+
           if (skipButton) {
             skipButton.click();
           }
         });
         console.log(`✅ Sent request to ${profile.linkedinUrl}`);
+        profile.status = "pending";
+        await profile.save();
       } else {
         console.log(`⚠️ No connect button found on ${profile.linkedinUrl}`);
       }
-      profile.status = "pending";
-      await profile.save();
     } catch (err) {
       console.log(123, err);
     }
@@ -338,7 +341,10 @@ const extractProfiles = async (size) => {
 
     while (currentPage <= maxPages) {
       await page.evaluate(() => {
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        window.scrollTo({
+          top: document.body.scrollHeight,
+          behavior: "smooth",
+        });
       });
       console.log(`📄 Scraping page ${currentPage}...`);
 
@@ -450,9 +456,9 @@ const deleteOldProfiles = async () => {
 };
 
 // Running every 20 min (adjust timing as needed)
-setInterval(executeTasks, 10000);
+setInterval(executeTasks, 600000);
 setInterval(deleteOldJobs, 60 * 60 * 1000);
 setInterval(deleteOldProfiles, 60 * 60 * 1000);
-setInterval(processJobs, 5 * 60 * 100);
+setInterval(processJobs, 60 * 60 * 1000);
 
 export default processJobs;
