@@ -5,6 +5,6 @@ const ProfileSchema = new  mongoose.Schema({
     linkedinUrl: {type: String, required: true},
     company: String,
     status: {type: String, default: "Connect"},
-})
+}, {timestamps: true})
 
 export default mongoose.model("Profile", ProfileSchema);

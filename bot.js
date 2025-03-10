@@ -5,13 +5,32 @@ import { configDotenv } from "dotenv";
 configDotenv();
 
 const browser = await puppeteer.launch({
-  headless: false, // Show the browser UI
-  args: ["--disable-blink-features=AutomationControlled"], // Prevent bot detection);
+  headless: false,
+  args: [
+    "--disable-blink-features=AutomationControlled",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-low-res-tiling",
+    "--force-device-scale-factor=1",
+  ],
 });
+
 const page = await browser.newPage();
 
+await page.evaluate(() => {
+  document.addEventListener("visibilitychange", () => {
+    console.log(`Visibility changed: ${document.visibilityState}`);
+  });
+
+  window.requestIdleCallback = (cb) => setTimeout(cb, 0);
+});
+
+
 const loginTolinkedIn = async () => {
-  await page.goto("https://www.linkedin.com/login", { waitUntil: "load" });
+  await page.goto("https://www.linkedin.com/login", {
+    waitUntil: "domcontentloaded",
+  });
   await page.type("#username", process.env.EMAIL);
   await page.type("#password", process.env.PASSWORD);
   await page.click('[type="submit"]');
@@ -40,7 +59,7 @@ const processJobs = async () => {
     console.log(`Searching for referrals at ${job.company}`);
 
     const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${job.company}`;
-    await page.goto(searchUrl, { waitUntil: "load" });
+    await page.goto(searchUrl, { waitUntil: "domcontentloaded" });
 
     const connections = await Profile.find({
       company: job.company,
@@ -52,6 +71,9 @@ const processJobs = async () => {
         await sendMessage(person.linkedinUrl, job);
       }
     }
+    await new Promise((resolve) =>
+      setTimeout(resolve, (Math.floor(Math.random() * 2) + 1) * 10000)
+    );
 
     const profiles = await extractProfiles(connections.length);
 
@@ -88,7 +110,7 @@ const processJobs = async () => {
   // If processJobs was queued while another function was running, run it now
   if (processJobsQueued) {
     processJobsQueued = false;
-    processJobs();
+    // processJobs();
   }
   // await browser.close();
 };
@@ -108,9 +130,13 @@ const processAcceptedProfiles = async () => {
 
   for (let profile of profiles) {
     console.log(`🔄 Checking if ${profile.linkedinUrl} accepted request...`);
-    await new Promise((resolve) => setTimeout(resolve, 20000));
-    await page.goto(profile.linkedinUrl, { waitUntil: "load" });
-    await new Promise((resolve) => setTimeout(resolve, 6000));
+    await new Promise((resolve) =>
+      setTimeout(resolve, (Math.floor(Math.random() * 2) + 1) * 10000)
+    );
+    await page.goto(profile.linkedinUrl, { waitUntil: "domcontentloaded" });
+    await new Promise((resolve) =>
+      setTimeout(resolve, (Math.floor(Math.random() * 2) + 1) * 10000)
+    );
     const job = await Job.findById(profile.jobId);
     console.log(job);
     const sended = await sendMessage(profile.linkedinUrl, job);
@@ -127,7 +153,7 @@ const processAcceptedProfiles = async () => {
   // If processJobs was queued while this was running, run it now
   if (processJobsQueued) {
     processJobsQueued = false;
-    processJobs();
+    // processJobs();
   }
 };
 
@@ -136,7 +162,9 @@ const sendMessage = async (profileUrl, job) => {
     // const newPage = page; // Open a new tab for sending messages (create multiple pages if your network is slow)
     // await newPage.goto(profileUrl, { waitUntil: "load" });
 
-    await new Promise((res) => setTimeout(res, 5000));
+    await new Promise((res) =>
+      setTimeout(res, (Math.floor(Math.random() * 5) + 1) * 1000)
+    );
 
     const messageOpened = await page.evaluate(() => {
       const buttons = Array.from(
@@ -156,7 +184,9 @@ const sendMessage = async (profileUrl, job) => {
       return;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 10000));
+    await new Promise((resolve) =>
+      setTimeout(resolve, (Math.floor(Math.random() * 2) + 1) * 10000)
+    );
     console.log("Job Data:", job);
 
     const sendStatus = await page.evaluate(({ position, company, jobId }) => {
@@ -169,7 +199,8 @@ const sendMessage = async (profileUrl, job) => {
         );
 
         if (messageContainer && sendButton) {
-          messageContainer.innerHTML = "<p>Enter text you wanna send";
+          if (jobId != "undefined") {
+            messageContainer.innerHTML = "Enter your text here";
 
           const inputEvent = new Event("input", { bubbles: true });
           messageContainer.dispatchEvent(inputEvent);
@@ -205,8 +236,8 @@ const sendMessage = async (profileUrl, job) => {
               }
 
               resolve(true);
-            }, 2000); // Wait 2 seconds before closing the window
-          }, 3000);
+            }, 5000); // Wait 2 seconds before closing the window
+          }, 5000);
         } else {
           console.error("Message container or send button not found");
           resolve(false);
@@ -237,21 +268,34 @@ const sendConnectionReq = async () => {
   console.log("🚀 Sending connection requests");
   const profiles = await Profile.find({ status: "Connect" });
   for (let profile of profiles) {
-    await page.goto(profile.linkedinUrl, { waitUntil: "load" });
+    await page.goto(profile.linkedinUrl, { waitUntil: "domcontentloaded" });
     try {
       const success = await page.evaluate(async () => {
         const connectButton = document.querySelector(
           'button[aria-label^="Invite"][aria-label$="to connect"]'
         );
 
-        await new Promise((resolve) => setTimeout(resolve, 7000));
+        await new Promise((resolve) =>
+          setTimeout(resolve, (Math.floor(Math.random() * 2) + 1) * 10000)
+        );
         if (connectButton) {
           connectButton.click();
+          return true;
+        } 
+
+        const userName = document.querySelector('h1.inline.t-24.v-align-middle.break-words')?.textContent.trim();
+        const moreButton = document.querySelector(
+          `div[aria-label="Invite ${userName} to connect"`
+        );
+        if(moreButton) {
+          moreButton.click();
           return true;
         }
         return false;
       });
-      await new Promise((resolve) => setTimeout(resolve, 7000));
+      await new Promise((resolve) =>
+        setTimeout(resolve, (Math.floor(Math.random() * 2) + 1) * 10000)
+      );
 
       if (success) {
         await page.evaluate(async () => {
@@ -280,7 +324,7 @@ const sendConnectionReq = async () => {
   // If processJobs was queued while this was running, run it now
   if (processJobsQueued) {
     processJobsQueued = false;
-    processJobs();
+    // processJobs();
   }
 };
 
@@ -292,10 +336,15 @@ const extractProfiles = async (size) => {
     const maxPages = 4;
 
     while (currentPage <= maxPages) {
+      await page.evaluate(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      });
       console.log(`📄 Scraping page ${currentPage}...`);
 
-      // Wait for 2 seconds
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Wait for some seconds
+      await new Promise((resolve) =>
+        setTimeout(resolve, (Math.floor(Math.random() * 2) + 1) * 10000)
+      );
 
       // Extract profile URLs
       const newProfiles = await page.evaluate(() => {
@@ -325,12 +374,16 @@ const extractProfiles = async (size) => {
 
       // Append new profiles while avoiding duplicates
       profiles = [...profiles, ...newProfiles];
-      await new Promise((resolve) => setTimeout(resolve, 7000));
+      await new Promise((resolve) =>
+        setTimeout(resolve, (Math.floor(Math.random() * 2) + 1) * 10000)
+      );
       // Check for a "Next" button and go to the next page
       const nextButton = await page.$("button[aria-label='Next']");
       if (nextButton) {
         nextButton.click();
-        await new Promise((resolve) => setTimeout(resolve, 7000)); // Wait 5 seconds to allow new results to load
+        await new Promise((resolve) =>
+          setTimeout(resolve, (Math.floor(Math.random() * 2) + 1) * 10000)
+        ); // Wait 5 seconds to allow new results to load
       } else {
         console.log("🚫 No more pages found.");
         break;
@@ -368,7 +421,7 @@ async function executeTasks() {
 const deleteOldJobs = async () => {
   try {
     const threeDaysAgo = new Date();
-    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 2);
 
     await Job.deleteMany({ createdAt: { $lt: threeDaysAgo } });
     console.log("Old Job Deleted");
@@ -377,8 +430,28 @@ const deleteOldJobs = async () => {
   }
 };
 
+const deleteOldProfiles = async () => {
+  try {
+    activeTask = true;
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 2);
+
+    await Profile.deleteMany({
+      createdAt: { $lt: threeDaysAgo },
+      status: "pending",
+    });
+    console.log("Old Profiles Deleted");
+  } catch (error) {
+    console.log(err);
+  } finally {
+    activeTask = false;
+  }
+};
+
 // Running every 20 min (adjust timing as needed)
-setInterval(executeTasks, 1200000);
+setInterval(executeTasks, 10000);
 setInterval(deleteOldJobs, 60 * 60 * 1000);
+setInterval(deleteOldProfiles, 60 * 60 * 1000);
+setInterval(processJobs, 5 * 60 * 100);
 
 export default processJobs;
