@@ -200,7 +200,8 @@ const sendMessage = async (profileUrl, job) => {
 
         if (messageContainer && sendButton) {
           if (jobId != "undefined") {
-            messageContainer.innerHTML = "Enter your text here";
+            messageContainer.innerHTML = "Enter your text here"
+          }
 
           const inputEvent = new Event("input", { bubbles: true });
           messageContainer.dispatchEvent(inputEvent);
